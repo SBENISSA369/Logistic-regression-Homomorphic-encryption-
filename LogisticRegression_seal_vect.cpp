@@ -137,7 +137,6 @@ int main (){
   Plaintext test2 = decryptor.decrypt(result);
   float     test_2 = encoder.decode(test2);
   cout<<"test_2 = "<<test_2<<endl;
-  
   return 0;
 }
 
