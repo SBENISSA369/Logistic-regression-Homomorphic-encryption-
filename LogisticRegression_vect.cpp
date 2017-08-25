@@ -10,7 +10,7 @@
 #include <fstream>
 #include <cstdlib>
 #include <sstream>
-
+#include <algorithm> 
 using namespace std;
 void read_csv(string csv_file_name,
 	      vector < vector<float> > & csv_data){
@@ -31,44 +31,130 @@ void read_csv(string csv_file_name,
     }
   }
 }
-float sigmoid(vector<float>&  X,
-	     vector<float>& model){
-  cout<<"X.size() = "<<X.size()<<endl;
-  X.insert(X.begin(),1);
-  cout<<"X.size() = "<<X.size()<<endl;
-  
+float max_value(vector <float>& temp ){
+  int k=0;
+  float max = 0;
+  while(k<temp.size()){
+    if(temp[k]>max)
+            max = temp[k];
+       k=k+1;
+  }
+    return max;
+  }
+float sigmoid(const vector<float>&  X,
+	      vector<float>& model){
   float somme = 0;
   for(int i = 0; i<X.size()-1; ++i){
-    somme += X[i] * model[i];
+    somme += X[i] * model[i+1];
   }
-  cout<<"somme = "<<somme<<endl;
+  somme += model[0];
   return(1/(1+exp(-somme)));
 }
-void SGD(vector<float>& sample,
+
+void scale(vector < vector<float>> & csv_data,
+          vector < vector<float>> & data_norm){
+        vector<float> maxi;
+        vector<float> test;
+        vector<float> temp;
+        float max = 0;
+        for(int j=0; j<csv_data[j].size(); ++j){
+                    for(int i=0; i<csv_data.size(); ++i){
+                          temp.push_back(csv_data[i][j]);
+                       }
+               float max_v=max_value(temp);
+               maxi.push_back(max_v);       
+               temp.clear();
+        }
+        for(int i=0; i<csv_data.size(); ++i){
+               for(int j=0; j<csv_data[i].size(); ++j)
+               test.push_back(csv_data[i][j]/maxi[j]);
+               data_norm.push_back(test);
+               test.clear();
+}
+}
+void split(vector < vector<float>> & data_norm,
+	   vector < vector<float>> & training,
+	   vector < vector<float>> & testing){
+  vector<int> indice;
+  srand ( unsigned ( time(0) ) );
+  for (int i=0; i<data_norm.size(); ++i) indice.push_back(i);
+  random_shuffle(indice.begin(), indice.end());
+  int t= indice.size()*0.2;
+  for(int j =0; j<indice.size();++j){
+    if(j < t)  testing.push_back(data_norm[j]);
+    else     training.push_back(data_norm[j]);
+  }
+ }
+void predict(vector < vector<float>> & testing,
+	     vector <float> & model,
+	     vector <bool> & pred){
+  for(int k=0; k<testing.size(); ++k){
+    if( sigmoid(testing[k],model) > 0.5 ) pred.push_back(1);
+    else  pred.push_back(0);
+     }
+ 
+
+	   }
+void accuracy(vector < vector<float>> & testing,
+	      vector <bool> & pred,
+	      float & acc){
+  int total = 0;
+  for(int i=0; i < testing.size(); ++i){
+              if(testing[i][testing[i].size()-1] == pred[i]){
+                   total = total + 1;
+               }
+   }
+    acc = (float(total)/pred.size()) * 100;
+}
+void SGD(const vector<float>& sample,
 	 vector<float>& model, float lr){
-  float sigmoid_class_lr = (sigmoid(sample,model)-sample[sample.size()-1]) * lr;
+  float T = sigmoid(sample,model);
+  float sigmoid_class_lr = (T-sample[sample.size()-1]) * lr;
   model[0] = model[0] - sigmoid_class_lr;
   for(int i = 1; i < model.size(); ++i){
-    float sigmoid_class_mult = sigmoid_class_lr * sample[i];
+  float sigmoid_class_mult = sigmoid_class_lr * sample[i-1];
     model[i] = model[i] - sigmoid_class_mult;
   }
-}
-void train(vector<vector<float>>& data,
+  }
+float erreur(const vector<vector<float>>& data,vector<float>& model){
+  float Erreur = 0;
+       for(int i=0; i<data.size(); ++i){
+    float sig = sigmoid(data[i], model);
+    Erreur += data[i][data[i].size()-1]*log(sig)+(1-data[i][data[i].size()-1])*log(1-sig);
+        }
+   return(-(Erreur/data.size()));
+  }
+
+void train(const vector<vector<float>>& data,
 	   vector<float>& model){
-  float lr = 0.001;
-   for (int number_iter = 0; number_iter<1000; ++number_iter ){
-               for(int i = 0; i < data.size(); ++i)
-               SGD(data[i], model,lr);
-	       	        }
+  float lr = 0.0001;
+  float loss = 0;
+  string const nomFichier("loss.csv");
+  ofstream monFlux(nomFichier.c_str());
+  
+for (int number_iter = 0; number_iter<50000; ++number_iter ){
+  for(int i = 0; i < data.size(); ++i)
+                    SGD(data[i], model,lr);
+  loss = erreur(data, model);
+   monFlux << number_iter << " , " << loss<< endl;
+   }
+
 }
 int main(){
   vector<vector<float>> csv_data;
-  vector<float> model{1,1,1,1,1,1,1,1,1};
+  vector<vector<float>> data_norm;
+  vector<vector<float>> training;
+  vector<vector<float>> testing;
+  vector<bool> pred;
+  float acc;
+  vector<float> model{0.1,0.2,-0.1,0.3,0.5,0.6,0.7,-0.2,0.3};
   string csv_file_name = "pima.csv";
   read_csv(csv_file_name, csv_data);
-  float t = sigmoid(csv_data[0],model);
-  cout <<"sig = "<<t<<endl;
-  //train(csv_data, model);
-  //for(int i = 0; i<model.size();++i)
-  // cout<<"model ["<<i<<"] = "<<model[i]<<endl;
-    }
+  scale(csv_data,data_norm);
+  split(data_norm, training, testing);
+  train(training, model);
+  predict(testing, model, pred);
+  for(int i=0; i<model.size(); ++i) cout<<"model ["<<i<<"] = "<<model[i]<<endl;
+  accuracy(testing, pred, acc);
+  cout <<"accuracy = "<< acc <<endl;
+ }
