@@ -11,6 +11,7 @@
 #include <fstream>
 #include <cstdlib>
 #include <sstream>
+#include <algorithm>
 using namespace std;
 using namespace seal;
 
@@ -33,6 +34,51 @@ void read_csv(string csv_file_name,
     }
   }
 }
+float max_value(vector <float>& temp ){
+  int k=0;
+  float max = 0;
+  while(k<temp.size()){
+    if(temp[k]>max)
+      max = temp[k];
+    k=k+1;
+  }
+  return max;
+}
+void scale(vector < vector<float>> & csv_data,
+	   vector < vector<float>> & data_norm){
+  vector<float> maxi;
+  vector<float> test;
+  vector<float> temp;
+  float max = 0;
+  for(int j=0; j<csv_data[j].size(); ++j){
+    for(int i=0; i<csv_data.size(); ++i){
+      temp.push_back(csv_data[i][j]);
+    }
+    float max_v=max_value(temp);
+    maxi.push_back(max_v);
+    temp.clear();
+  }
+  for(int i=0; i<csv_data.size(); ++i){
+    for(int j=0; j<csv_data[i].size(); ++j)
+      test.push_back(csv_data[i][j]/maxi[j]);
+    data_norm.push_back(test);
+    test.clear();
+  }
+}
+void split(vector < vector<Ciphertext>> & data_enc,
+	   vector < vector<Ciphertext>> & training,
+	   vector < vector<Ciphertext>> & testing){
+  vector<int> indice;
+  srand ( unsigned ( time(0) ) );
+  for (int i=0; i<data_enc.size(); ++i) indice.push_back(i);
+  random_shuffle(indice.begin(), indice.end());
+  int t= indice.size()*0.2;
+  for(int j =0; j<indice.size();++j){
+    if(j < t)  testing.push_back(data_enc[j]);
+    else     training.push_back(data_enc[j]);
+  }
+}
+
 void encrypt_data(vector<vector<float>> &csv_data,
 		  vector<vector<Ciphertext>> &data_enc, Encryptor encryptor, Decryptor decryptor, Evaluator evaluator,FractionalEncoder encoder){
   vector<Ciphertext> encrypted_temp;
@@ -45,26 +91,24 @@ void encrypt_data(vector<vector<float>> &csv_data,
     encrypted_temp.clear();
   }
 }
-
 Ciphertext sigmoid_enc( vector<Ciphertext>& X_enc, vector<Ciphertext>& model_enc, Encryptor encryptor, Decryptor decryptor, Evaluator evaluator,FractionalEncoder encoder){
-
-  X_enc.insert( X_enc.begin(), encryptor.encrypt(encoder.encode(1)));
   vector<Ciphertext> vect_somme;
+  vect_somme.push_back(model_enc[0]);
   for(int i=0 ; i< X_enc.size()-1 ; i++){
-    Ciphertext mult = evaluator.multiply(X_enc[i], model_enc[i]);
+    Ciphertext mult = evaluator.multiply(X_enc[i], model_enc[i+1]);
     vect_somme.push_back(mult);
   }
   Ciphertext somme = evaluator.add_many(vect_somme);
   Ciphertext somme_div = evaluator.multiply_plain(somme , encoder.encode(1.0/2) );
   Ciphertext add_one = evaluator.add_plain(somme_div, encoder.encode(1));
-  Ciphertext add_one_demi = evaluator.multiply_plain(add_one, encoder.encode(1.0/2));
+  Ciphertext add_one_half = evaluator.multiply_plain(add_one, encoder.encode(1.0/2));
   vect_somme.clear();
   if(encoder.decode(decryptor.decrypt(somme)) < -2)
-   return encryptor.encrypt(encoder.encode(0));
+   return encryptor.encrypt(encoder.encode(0.1));
   else if (encoder.decode(decryptor.decrypt(somme)) > -2 && encoder.decode(decryptor.decrypt(somme)) < 2)
-   return add_one_demi;
+   return add_one_half;
   else
-     return encryptor.encrypt(encoder.encode(1));
+   return encryptor.encrypt(encoder.encode(1));
 
 }
 void SGD(vector<Ciphertext> &sample_enc,
@@ -77,21 +121,22 @@ void SGD(vector<Ciphertext> &sample_enc,
     for( int i = 1; i < model_enc.size(); i++){
            Ciphertext sigmoid_class_mult = evaluator.multiply(sigmoid_class_lr, sample_enc[i]);
            model_enc[i] = evaluator.sub(model_enc[i], sigmoid_class_mult );
-	   
-	    }
+	  }
 }
 void train(vector<vector<Ciphertext>>& data_enc,                                                                                                           
 	   vector<Ciphertext>& model_enc, Encryptor encryptor, Decryptor decryptor, Evaluator evaluator,FractionalEncoder encoder){
-  
-  Plaintext encoded_lr = encoder.encode(0.001);
-  for(int i = 0; i<data_enc.size(); ++i){
-    for(int j=0; j<model_enc.size();++j)
-      cout<<"theta ["<<j<<"] = "<<encoder.decode(decryptor.decrypt(model_enc[j]))<<endl;
-    
-      SGD(data_enc[i], model_enc, encoded_lr, encryptor, decryptor, evaluator, encoder);
-      cout<<"------------------"<<i<<"----------------------------------"<<endl;
+  int iter = 0;
+  Plaintext encoded_lr = encoder.encode(0.0001);
+  while(iter<100){
+    for(int i = 0; i< model_enc.size(); ++i){
+                SGD(data_enc[i], model_enc, encoded_lr, encryptor, decryptor, evaluator, encoder);
+	         }
+      cout<<"--------------------"<<iter<<"-------------------"<<endl;
+      for(int j=0; j < model_enc.size(); ++j)
+	cout<<"model_enc ["<<j<<"] = "<<(encoder.decode(decryptor.decrypt(model_enc[j])))<<endl;
+      iter=iter+1;
   }
-}                                                                                                                                                                
+ }                                                                                                                                                                
 //5
 /*
 void erreur(vector<vector<Ciphertext>> &model_enc,                                                                                                               
@@ -128,16 +173,25 @@ int main (){
   Decryptor decryptor(parms, secret_key);
   Evaluator evaluator(parms, evaluation_keys);
   vector<vector<float> > csv_data;
-  vector<float> model{1,0.5,1,1,1,1,1,1,1};
+  vector<vector<float>> data_norm;
+  vector<float> model{1,1,1,1,1,1,1,1,1};
   vector<Ciphertext> model_enc;
   vector< vector<Ciphertext> > data_enc;
+  vector< vector<Ciphertext>> training;
+  vector< vector<Ciphertext>> testing;
   string csv_file_name = "pima.csv";
+  cout<<"read_csv"<<endl;
   read_csv(csv_file_name,csv_data);
-  encrypt_data(csv_data, data_enc, encryptor, decryptor, evaluator, encoder);
+  cout<<"scale dataset"<<endl;
+  scale(csv_data, data_norm);
+  cout<<"dataset encryption"<<endl;
+  encrypt_data(data_norm, data_enc, encryptor, decryptor, evaluator, encoder);
+  cout<<"split dataset"<<endl;
+  split(data_enc, training, testing);
+  cout<<"model encryptoin"<<endl;
   model_encryption(model, model_enc,encryptor, decryptor, evaluator, encoder);
-  generator.generate_evaluation_keys(1);
-  train (data_enc, model_enc, encryptor, decryptor, evaluator, encoder);
-  for(int j=0; j<model_enc.size();++j)
-    cout<<"theta ["<<j<<"] = "<<encoder.decode(decryptor.decrypt(model_enc[j]))<<endl;
+  //generator.generate_evaluation_keys(1);
+ cout<<"training set"<<endl;
+  train (training, model_enc, encryptor, decryptor, evaluator, encoder);
   return 0;
 }
